@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#155eef">
-  <title>RT Bhaban Rent Manager</title>
+  <title>House Rent Manager</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
@@ -15,7 +15,7 @@
   <main class="auth-wrap" id="auth-view">
     <section class="auth-card">
       <div class="brand-mark">⌂</div>
-      <h1>RT Bhaban Rent Manager</h1>
+      <h1>House Rent Manager</h1>
       <p class="muted">Manage rental units, tenants, rent and receipts.</p>
       <div class="tabs">
         <button class="tab active" type="button" data-auth-tab="signin">Sign in</button>
@@ -31,8 +31,23 @@
   </main>
 
   <div id="app-view" class="app hidden">
+    <section id="tenant-portal" class="tenant-portal hidden">
+      <header class="tenant-topbar">
+        <div><p class="eyebrow">TENANT PORTAL</p><h1>Your rental overview</h1><p id="tenant-welcome" class="muted"></p></div>
+        <button id="tenant-signout-btn" class="btn secondary" type="button">Sign out</button>
+      </header>
+      <div class="stats-grid">
+        <article class="stat-card"><span>Monthly rent</span><strong id="tenant-rent">৳0</strong><small>Current assigned unit</small></article>
+        <article class="stat-card"><span>Paid this month</span><strong id="tenant-paid">৳0</strong><small>Payments recorded</small></article>
+        <article class="stat-card"><span>Due this month</span><strong id="tenant-due">৳0</strong><small>Outstanding balance</small></article>
+        <article class="stat-card"><span>Arrears through month</span><strong id="tenant-arrears">৳0</strong><small>Based on recorded rent</small></article>
+      </div>
+      <section class="panel"><div class="panel-heading"><div><h2>Your rental details</h2><p class="muted">Only rental information assigned to your account is shown.</p></div><div class="report-actions"><label class="inline-label">Month <input id="tenant-month" type="month"></label><button id="tenant-share-statement" class="btn primary" type="button">Share statement on WhatsApp</button></div></div><div class="table-wrap"><table><thead><tr><th>Unit</th><th>Monthly rent</th><th>Lease start</th><th>Month status</th></tr></thead><tbody id="tenant-unit-table"></tbody></table></div></section>
+      <section class="panel"><div class="panel-heading"><div><h2>Your payment history</h2><p class="muted">Open a receipt to view or share it.</p></div></div><div class="table-wrap"><table><thead><tr><th>Receipt</th><th>Payment date</th><th>Rent month</th><th>Method</th><th>Amount</th><th></th></tr></thead><tbody id="tenant-payments-table"></tbody></table></div></section>
+      <p class="tenant-security-note">Sign out when using a shared device. Contact your landlord if a payment or balance looks incorrect.</p>
+    </section>
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark small-mark">⌂</span><span>Ratan Bhaban Rent Manager</span></div>
+      <div class="brand"><span class="brand-mark small-mark">⌂</span><span>Rent Manager</span></div>
       <nav>
         <button class="nav-item active" data-page="dashboard">▦ <span>Dashboard</span></button>
         <button class="nav-item" data-page="units">▤ <span>Rental units</span></button>
@@ -91,7 +106,7 @@
         <div class="stats-grid compact-stats"><article class="stat-card"><span>Expected</span><strong id="report-expected">৳0</strong></article><article class="stat-card"><span>Collected</span><strong id="report-collected">৳0</strong></article><article class="stat-card"><span>Due this month</span><strong id="report-due">৳0</strong></article><article class="stat-card"><span>Total arrears through month</span><strong id="report-arrears">৳0</strong></article></div>
         <section class="panel"><div class="panel-heading"><div><h2>Unit-wise report</h2><p class="muted">Expected rent minus payments recorded for the selected month.</p></div><button id="export-csv-btn" class="btn secondary">Export CSV</button></div><div class="table-wrap"><table><thead><tr><th>Unit</th><th>Tenant</th><th>Expected</th><th>Paid</th><th>Due</th><th>Arrears through month</th><th>Status</th></tr></thead><tbody id="report-table"></tbody></table></div></section>
       </section>
-      <footer>Ratan Bhaban Rent Manager · Keep a backup of your records regularly.</footer>
+      <footer>House Rent Manager · Keep a backup of your records regularly.</footer>
     </main>
   </div>
 
@@ -137,7 +152,7 @@
   <dialog id="receipt-dialog" class="modal receipt-modal">
     <div class="modal-head no-print"><div><h2>Payment receipt</h2><p class="muted">Print or save as PDF.</p></div><button type="button" class="icon-btn" data-close="receipt-dialog">×</button></div>
     <div id="receipt-content" class="receipt-content"></div>
-    <div class="modal-actions no-print"><button type="button" class="btn secondary" data-close="receipt-dialog">Close</button><button id="print-receipt-btn" type="button" class="btn primary">Print receipt</button></div>
+    <div class="modal-actions no-print"><button type="button" class="btn secondary" data-close="receipt-dialog">Close</button><button id="share-receipt-btn" type="button" class="btn secondary">Share on WhatsApp</button><button id="print-receipt-btn" type="button" class="btn primary">Print receipt</button></div>
   </dialog>
 </body>
 </html>
