@@ -12,6 +12,30 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <main id="public-share-view" class="tenant-portal hidden">
+    <header class="tenant-topbar">
+      <div><p class="eyebrow">PRIVATE RENT STATEMENT</p><h1>Your rental overview</h1><p id="public-share-welcome" class="muted">Loading your rental information…</p></div>
+      <button id="public-print-btn" class="btn secondary" type="button">Print statement</button>
+    </header>
+    <div id="public-share-error" class="notice hidden" role="alert"></div>
+    <div id="public-share-content" class="hidden">
+      <div class="stats-grid">
+        <article class="stat-card"><span>Monthly rent</span><strong id="public-rent">৳0</strong><small>Assigned rental unit</small></article>
+        <article class="stat-card"><span>Paid this month</span><strong id="public-paid">৳0</strong><small>Payments recorded</small></article>
+        <article class="stat-card"><span>Due this month</span><strong id="public-due">৳0</strong><small>Outstanding for selected month</small></article>
+        <article class="stat-card"><span>Arrears through month</span><strong id="public-arrears">৳0</strong><small>Based on recorded rent</small></article>
+      </div>
+      <section class="panel"><div class="panel-heading"><div><h2>Rental details</h2><p class="muted">Your unit and rent information</p></div><label class="inline-label">Month <input id="public-month" type="month"></label></div>
+        <div class="table-wrap"><table><thead><tr><th>Unit</th><th>Monthly rent</th><th>Lease start</th><th>Month status</th></tr></thead><tbody id="public-unit-table"></tbody></table></div>
+      </section>
+      <section class="panel"><div class="panel-heading"><div><h2>Payment history and receipts</h2><p class="muted">Print any receipt for your records.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Receipt</th><th>Payment date</th><th>Rent month</th><th>Method</th><th>Amount</th><th></th></tr></thead><tbody id="public-payments-table"></tbody></table></div>
+      </section>
+      <p class="tenant-security-note">This private link shows information for one tenant only. If you received it by mistake, please notify the landlord.</p>
+    </div>
+    <footer>House Rent Manager · Private tenant statement</footer>
+  </main>
+
   <main class="auth-wrap" id="auth-view">
     <section class="auth-card">
       <div class="brand-mark">⌂</div>

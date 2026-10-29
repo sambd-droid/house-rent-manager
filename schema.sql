@@ -133,3 +133,119 @@ for each row execute function public.check_rent_payment_owner();
 -- where t.email = 'TENANT-EMAIL-STORED-IN-TENANT-RECORD@example.com'
 --   and u.email = 'TENANT-LOGIN-EMAIL@example.com'
 --   and t.user_id = (select id from auth.users where email = 'YOUR-LANDLORD-EMAIL@example.com');
+
+
+-- ---------------------------------------------------------------------------
+-- No-login tenant sharing links. Each tenant receives a unique secret URL.
+-- The raw token is returned only once to the authenticated landlord; only its
+-- SHA-256 hash is stored. Public visitors can call the narrowly scoped RPC only.
+-- ---------------------------------------------------------------------------
+create table if not exists public.tenant_share_links (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  revoked_at timestamptz null
+);
+alter table public.tenant_share_links enable row level security;
+revoke all on public.tenant_share_links from anon, authenticated;
+
+create or replace function public.create_tenant_share_link(p_tenant_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_token text;
+begin
+  if v_uid is null then raise exception 'Sign in as the landlord to create a sharing link'; end if;
+  if not exists (select 1 from public.profiles p where p.user_id = v_uid and p.role = 'landlord') then
+    raise exception 'Only landlord accounts can create sharing links';
+  end if;
+  if not exists (select 1 from public.tenants t where t.id = p_tenant_id and t.user_id = v_uid) then
+    raise exception 'Tenant not found in your account';
+  end if;
+  if not exists (select 1 from public.rental_units u where u.tenant_id = p_tenant_id and u.user_id = v_uid and u.active) then
+    raise exception 'Assign this tenant to an active rental unit first';
+  end if;
+  update public.tenant_share_links set revoked_at = now()
+    where tenant_id = p_tenant_id and user_id = v_uid and revoked_at is null;
+  v_token := encode(gen_random_bytes(32), 'hex');
+  insert into public.tenant_share_links(user_id, tenant_id, token_hash)
+    values (v_uid, p_tenant_id, encode(digest(v_token, 'sha256'), 'hex'));
+  return v_token;
+end;
+$$;
+revoke all on function public.create_tenant_share_link(uuid) from public, anon;
+grant execute on function public.create_tenant_share_link(uuid) to authenticated;
+
+create or replace function public.revoke_tenant_share_link(p_tenant_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null or not exists (select 1 from public.profiles p where p.user_id=v_uid and p.role='landlord') then
+    raise exception 'Only signed-in landlords can revoke sharing links';
+  end if;
+  update public.tenant_share_links set revoked_at=now()
+   where tenant_id=p_tenant_id and user_id=v_uid and revoked_at is null;
+  return true;
+end;
+$$;
+revoke all on function public.revoke_tenant_share_link(uuid) from public, anon;
+grant execute on function public.revoke_tenant_share_link(uuid) to authenticated;
+
+create or replace function public.get_shared_tenant_rent(p_token text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_tenant public.tenants%rowtype;
+  v_unit public.rental_units%rowtype;
+  v_payments jsonb;
+  v_hash text;
+begin
+  if p_token is null or length(p_token) < 40 or length(p_token) > 100 then
+    raise exception 'Invalid or revoked private link';
+  end if;
+  v_hash := encode(digest(p_token, 'sha256'), 'hex');
+  select t.* into v_tenant
+    from public.tenant_share_links l
+    join public.tenants t on t.id=l.tenant_id and t.user_id=l.user_id
+    where l.token_hash=v_hash and l.revoked_at is null
+    limit 1;
+  if not found then raise exception 'Invalid or revoked private link'; end if;
+  select u.* into v_unit
+    from public.rental_units u
+    where u.tenant_id=v_tenant.id and u.user_id=v_tenant.user_id and u.active
+    order by u.lease_start desc
+    limit 1;
+  if not found then
+    return jsonb_build_object('tenant_name', v_tenant.full_name, 'unit', null, 'payments', '[]'::jsonb);
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'id', p.id, 'unit_id', p.unit_id, 'receipt_no', p.receipt_no,
+      'payment_date', p.payment_date, 'rent_month', p.rent_month,
+      'method', p.method, 'amount', p.amount
+    ) order by p.payment_date desc), '[]'::jsonb)
+    into v_payments
+    from public.rent_payments p
+    where p.user_id=v_tenant.user_id and p.tenant_id=v_tenant.id and p.unit_id=v_unit.id;
+  return jsonb_build_object(
+    'tenant_name', v_tenant.full_name,
+    'unit', jsonb_build_object('id',v_unit.id,'unit_name',v_unit.unit_name,
+      'monthly_rent',v_unit.monthly_rent,'lease_start',v_unit.lease_start,'active',v_unit.active),
+    'payments', v_payments
+  );
+end;
+$$;
+revoke all on function public.get_shared_tenant_rent(text) from public, authenticated;
+grant execute on function public.get_shared_tenant_rent(text) to anon, authenticated;

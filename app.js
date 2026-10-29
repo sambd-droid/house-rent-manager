@@ -13,6 +13,7 @@
   const escapeHTML = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   let supabase = null, currentUser = null, authMode = "signin", currentRole = null;
   let tenants = [], units = [], payments = [], lastReceipt = null;
+  let publicShareMode = false, publicShareData = null;
   let toastTimer = null;
 
   function toast(message, error = false) {
@@ -116,13 +117,91 @@
       `<tr><td><strong>${escapeHTML(p.receipt_no)}</strong></td><td>${escapeHTML(p.payment_date)}</td><td>${escapeHTML(p.rent_month.slice(0,7))}</td><td>${escapeHTML(p.method)}</td><td>${money(p.amount)}</td><td><button class="mini-btn" data-tenant-receipt="${p.id}">Receipt</button></td></tr>`
     ).join("") || emptyRow(6, "No payment history available.");
   }
-  function shareLandlordTenantStatement(tenantId) {
+  function shareMonthLabel(month) { return month ? new Date(`${month}-01T12:00:00`).toLocaleDateString("en-BD", {month:"long",year:"numeric"}) : ""; }
+  async function shareLandlordTenantStatement(tenantId) {
     const tenant = tenants.find(t => t.id === tenantId);
     const unit = units.find(u => u.tenant_id === tenantId && u.active);
     if (!tenant || !unit) { toast("Assign this tenant to an active rental unit first.", true); return; }
-    const month = activeMonth(), paid = paidFor(unit.id, month), expected = expectedFor(unit, month), due = Math.max(0, expected-paid);
-    const message = `Rent statement\\nTenant: ${tenant.full_name}\\nUnit: ${unit.unit_name}\\nMonth: ${monthLabel(month)}\\nMonthly rent: ${money(expected)}\\nPaid: ${money(paid)}\\nOutstanding: ${money(due)}\\nTenant portal: ${location.href}`;
-    shareWhatsApp(message);
+    try {
+      const result = await runQuery(supabase.rpc("create_tenant_share_link", { p_tenant_id: tenantId }));
+      const token = typeof result === "string" ? result : result?.token;
+      if (!token) throw new Error("Supabase did not return a sharing token. Check the tenant-sharing SQL setup.");
+      const link = `${location.origin}${location.pathname}?share=${encodeURIComponent(token)}`;
+      const month = activeMonth(), paid = paidFor(unit.id, month), expected = expectedFor(unit, month), due = Math.max(0, expected-paid);
+      const message = `Rent statement\nTenant: ${tenant.full_name}\nUnit: ${unit.unit_name}\nMonth: ${monthLabel(month)}\nMonthly rent: ${money(expected)}\nPaid: ${money(paid)}\nOutstanding: ${money(due)}\nView your private rent details and receipts (no account needed): ${link}`;
+      shareWhatsApp(message);
+      toast("Private link created. Review and send the WhatsApp message.");
+    } catch (e) { toast(errMessage(e), true); }
+  }
+  function publicShareStatus(unit, month, paid) {
+    if (!unit || !unit.active) return ["Inactive", "vacant"];
+    if (unit.lease_start > `${month}-01`) return ["Not started", "vacant"];
+    if (Math.max(0, Number(unit.monthly_rent) - paid) <= 0) return ["Paid", "paid"];
+    return [paid > 0 ? "Partial" : "Due", paid > 0 ? "partial" : "due"];
+  }
+  function renderPublicShare() {
+    const data = publicShareData;
+    if (!data) return;
+    const unit = data.unit || null;
+    const month = $("public-month").value || monthISO();
+    const unitPayments = (data.payments || []).filter(p => unit && p.unit_id === unit.id);
+    const paid = unitPayments.filter(p => p.rent_month === monthDate(month)).reduce((s,p) => s + Number(p.amount || 0), 0);
+    const eligible = unit && unit.active && unit.lease_start <= monthDate(month);
+    const expected = eligible ? Number(unit.monthly_rent || 0) : 0;
+    let arrears = 0;
+    if (unit && unit.active && unit.lease_start <= monthDate(month)) {
+      const start = new Date(`${unit.lease_start}T12:00:00`), end = new Date(`${month}-01T12:00:00`);
+      const cursor = new Date(start.getFullYear(), start.getMonth(), 1, 12);
+      while (cursor <= end) {
+        const m = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}`;
+        const mPaid = unitPayments.filter(p => p.rent_month === monthDate(m)).reduce((s,p) => s + Number(p.amount || 0), 0);
+        arrears += Math.max(0, Number(unit.monthly_rent || 0) - mPaid);
+        cursor.setMonth(cursor.getMonth()+1);
+      }
+    }
+    $("public-share-welcome").textContent = `Welcome, ${data.tenant_name || "Tenant"}`;
+    $("public-rent").textContent = money(unit?.monthly_rent || 0);
+    $("public-paid").textContent = money(paid);
+    $("public-due").textContent = money(Math.max(0, expected-paid));
+    $("public-arrears").textContent = money(arrears);
+    const status = publicShareStatus(unit, month, paid);
+    $("public-unit-table").innerHTML = unit
+      ? `<tr><td><strong>${escapeHTML(unit.unit_name)}</strong></td><td>${money(unit.monthly_rent)}</td><td>${escapeHTML(unit.lease_start)}</td><td>${badge(status)}</td></tr>`
+      : emptyRow(4, "No active rental unit is assigned to this tenant.");
+    $("public-payments-table").innerHTML = unitPayments.map(p =>
+      `<tr><td><strong>${escapeHTML(p.receipt_no)}</strong></td><td>${escapeHTML(p.payment_date)}</td><td>${escapeHTML(String(p.rent_month || "").slice(0,7))}</td><td>${escapeHTML(p.method || "—")}</td><td>${money(p.amount)}</td><td><button class="mini-btn" data-public-receipt="${escapeHTML(p.id)}">Print receipt</button></td></tr>`
+    ).join("") || emptyRow(6, "No payment history available.");
+  }
+  function printPublicReceipt(paymentId) {
+    const payment = (publicShareData?.payments || []).find(p => p.id === paymentId);
+    if (!payment) return;
+    const data = publicShareData, unit = data.unit || {};
+    const win = window.open("", "_blank", "width=720,height=760");
+    if (!win) { toast("Allow pop-ups to print the receipt.", true); return; }
+    const content = `<h1>House Rent Manager</h1><h2>Payment receipt</h2><hr><p><b>Receipt:</b> ${escapeHTML(payment.receipt_no)}</p><p><b>Tenant:</b> ${escapeHTML(data.tenant_name)}</p><p><b>Unit:</b> ${escapeHTML(unit.unit_name || "—")}</p><p><b>Payment date:</b> ${escapeHTML(payment.payment_date)}</p><p><b>Rent month:</b> ${escapeHTML(shareMonthLabel(String(payment.rent_month).slice(0,7)))}</p><p><b>Method:</b> ${escapeHTML(payment.method || "—")}</p><h2>Amount received: ${money(payment.amount)}</h2><p>This receipt reflects the payment recorded by the landlord.</p>`;
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Rent receipt</title><style>body{font:16px Arial,sans-serif;max-width:650px;margin:40px auto;color:#222}h1{color:#155eef}hr{border:0;border-top:1px solid #ddd}</style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
+    win.document.close();
+  }
+  async function loadPublicShare(token) {
+    publicShareMode = true;
+    $("auth-view").classList.add("hidden"); $("app-view").classList.add("hidden"); $("public-share-view").classList.remove("hidden");
+    if (!configured || !window.supabase?.createClient) {
+      $("public-share-error").textContent = "This website has not been configured. Please contact the landlord.";
+      $("public-share-error").classList.remove("hidden"); return;
+    }
+    supabase = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+    try {
+      const data = await runQuery(supabase.rpc("get_shared_tenant_rent", {p_token: token}));
+      if (!data || data.error || !data.tenant_name) throw new Error("This private link is invalid, expired, or has been revoked. Ask your landlord for a new link.");
+      publicShareData = data;
+      $("public-month").value = monthISO();
+      $("public-share-content").classList.remove("hidden");
+      renderPublicShare();
+    } catch (e) {
+      $("public-share-error").textContent = /invalid|revoked|expired/i.test(e.message || "") ? e.message : "Unable to load this private statement. The link may have been revoked or the service is unavailable.";
+      $("public-share-error").classList.remove("hidden");
+      $("public-share-welcome").textContent = "Rent information unavailable";
+    }
   }
   function shareTenantStatement() {
     const tenant = tenants[0] || null, unit = units.find(u => u.tenant_id === tenant?.id) || units[0] || null;
@@ -157,7 +236,7 @@
   function renderTenants() {
     $("tenants-table").innerHTML=tenants.map(t=>{
       const assigned=units.filter(u=>u.tenant_id===t.id).map(u=>u.unit_name).join(", ") || "—";
-      return `<tr><td><strong>${escapeHTML(t.full_name)}</strong></td><td>${escapeHTML(t.phone||"—")}</td><td>${escapeHTML(t.email||"—")}</td><td>${escapeHTML(assigned)}</td><td><div class="row-actions"><button class="mini-btn" data-share-tenant="${t.id}">WhatsApp</button><button class="mini-btn" data-edit-tenant="${t.id}">Edit</button><button class="mini-btn danger" data-delete-tenant="${t.id}">Delete</button></div></td></tr>`;
+      return `<tr><td><strong>${escapeHTML(t.full_name)}</strong></td><td>${escapeHTML(t.phone||"—")}</td><td>${escapeHTML(t.email||"—")}</td><td>${escapeHTML(assigned)}</td><td><div class="row-actions"><button class="mini-btn" data-share-tenant="${t.id}">Share private link</button><button class="mini-btn danger" data-revoke-tenant="${t.id}">Revoke link</button><button class="mini-btn" data-edit-tenant="${t.id}">Edit</button><button class="mini-btn danger" data-delete-tenant="${t.id}">Delete</button></div></td></tr>`;
     }).join("") || emptyRow(5,"No tenants added yet.");
   }
   function renderPayments() {
@@ -316,12 +395,20 @@
     $("tenant-payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-tenant-receipt]");if(btn){const p=payments.find(x=>x.id===btn.dataset.tenantReceipt);if(p)showReceipt(p);}});
     $("print-report-btn").addEventListener("click",()=>window.print());$("export-csv-btn").addEventListener("click",exportCSV);
     $("units-table").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-unit]"),del=e.target.closest("[data-delete-unit]");if(edit)openUnit(edit.dataset.editUnit);if(del)deleteRecord("rental_units",del.dataset.deleteUnit,"rental unit");});
-    $("tenants-table").addEventListener("click",e=>{const share=e.target.closest("[data-share-tenant]"),edit=e.target.closest("[data-edit-tenant]"),del=e.target.closest("[data-delete-tenant]");if(share)shareLandlordTenantStatement(share.dataset.shareTenant);if(edit)openTenant(edit.dataset.editTenant);if(del){const id=del.dataset.deleteTenant;if(units.some(u=>u.tenant_id===id)){toast("Reassign or remove this tenant from rental units before deleting.",true);return;}deleteRecord("tenants",id,"tenant");}});
+    $("tenants-table").addEventListener("click",async e=>{const share=e.target.closest("[data-share-tenant]"),revoke=e.target.closest("[data-revoke-tenant]"),edit=e.target.closest("[data-edit-tenant]"),del=e.target.closest("[data-delete-tenant]");if(share)shareLandlordTenantStatement(share.dataset.shareTenant);if(revoke){if(confirm("Revoke this tenant’s current private link? Anyone using it will lose access.")){try{await runQuery(supabase.rpc("revoke_tenant_share_link",{p_tenant_id:revoke.dataset.revokeTenant}));toast("Private link revoked.");}catch(err){toast(errMessage(err),true);}}}if(edit)openTenant(edit.dataset.editTenant);if(del){const id=del.dataset.deleteTenant;if(units.some(u=>u.tenant_id===id)){toast("Reassign or remove this tenant from rental units before deleting.",true);return;}deleteRecord("tenants",id,"tenant");}});
+    $("public-month").addEventListener("change",renderPublicShare);
+    $("public-print-btn").addEventListener("click",()=>window.print());
+    $("public-payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-public-receipt]");if(btn)printPublicReceipt(btn.dataset.publicReceipt);});
     $("payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-receipt]");if(btn){const p=payments.find(x=>x.id===btn.dataset.receipt);if(p)showReceipt(p);}});
     $("dashboard-month").value=monthISO();$("report-month").value=monthISO();$("current-month-label").textContent=monthLabel(monthISO());
   }
   async function init() {
     bindEvents();
+    const shareToken = new URLSearchParams(location.search).get("share");
+    if (shareToken) {
+      await loadPublicShare(shareToken);
+      return;
+    }
     if(!configured || !window.supabase?.createClient) {
       showAuth();toast("Setup needed: configure Supabase in config.js and run schema.sql.",true);return;
     }
