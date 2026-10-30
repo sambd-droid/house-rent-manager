@@ -12,6 +12,21 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <main id="shared-tenant-view" class="shared-wrap hidden">
+    <section class="shared-card">
+      <div class="shared-brand">⌂ House Rent Manager</div>
+      <p class="eyebrow">TENANT STATEMENT</p><h1 id="shared-tenant-name">Loading your statement…</h1>
+      <div id="shared-tenant-details" class="shared-details"></div>
+      <div id="shared-error" class="notice hidden"></div>
+      <div id="shared-content" class="hidden">
+        <div id="shared-units" class="shared-units"></div>
+        <h2>Advance rent & security deposit</h2><div id="shared-funds" class="table-wrap"></div>
+        <h2>Payment history & payment slips</h2><div id="shared-payments" class="table-wrap"></div>
+        <h2>Advance / deposit transaction history</h2><div id="shared-fund-history" class="table-wrap"></div>
+        <p class="shared-foot">This private statement is provided by your landlord.</p>
+      </div>
+    </section>
+  </main>
   <main class="auth-wrap" id="auth-view">
     <section class="auth-card">
       <div class="brand-mark">⌂</div>
@@ -79,7 +94,7 @@
 
       <section id="page-tenants" class="page hidden">
         <div class="section-head"><div><h2>Tenants</h2><p class="muted">Contact and occupancy details.</p></div><button id="add-tenant-btn" class="btn primary">＋ Add tenant</button></div>
-        <section class="panel"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Assigned unit</th><th></th></tr></thead><tbody id="tenants-table"></tbody></table></div></section>
+        <section class="panel"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Assigned unit</th><th>Share</th><th></th></tr></thead><tbody id="tenants-table"></tbody></table></div></section>
       </section>
 
       <section id="page-payments" class="page hidden">

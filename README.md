@@ -88,3 +88,12 @@ You can also use GitHub's web UI: **Add file → Upload files**. Do not upload s
 - **Can't sign in after signup:** if email confirmation is enabled, confirm the email first.
 - **Site loads but data doesn't:** check browser devtools Console and Supabase logs; verify the Pages URL is allowed in Auth URL Configuration.
 - **GitHub Pages 404:** confirm `index.html` is in the selected branch and folder and wait a few minutes after saving Pages settings.
+
+## Private tenant WhatsApp sharing
+1. In Supabase SQL Editor, run `share-links.sql` after the main `schema.sql` and the advance/deposit table migration.
+2. Replace `index.html`, `styles.css`, and `app.js` in GitHub Pages with these project files. Keep your existing `config.js` values.
+3. Sign in as the landlord, open Tenants, and click **WhatsApp Share**. A unique private link is created; creating a new link for the same tenant revokes the previous one.
+4. The tenant opens the link without an account. The public RPC returns only that tenant's name and contact details, assigned units, payment history, payment-slip details, and advance/deposit transaction history. It does not expose direct table access or other tenants' records.
+5. On the tenant page, each payment row has a **View / Print** button. The tenant can print the slip or choose **Save as PDF** in the browser print dialog.
+
+The share URL is a bearer secret: anyone who receives or is forwarded the URL can view that tenant's statement. Revoke a link by generating a replacement link for that tenant (which automatically revokes the previous one). For stronger privacy, share links only with the intended tenant.
