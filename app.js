@@ -11,9 +11,8 @@
   const monthDate = (month) => `${month}-01`;
   const monthLabel = (month) => month ? new Date(`${month}-01T12:00:00`).toLocaleDateString("en-BD",{month:"long",year:"numeric"}) : "";
   const escapeHTML = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  let supabase = null, currentUser = null, authMode = "signin", currentRole = null;
-  let tenants = [], units = [], payments = [], lastReceipt = null;
-  let publicShareMode = false, publicShareData = null;
+  let supabase = null, currentUser = null, authMode = "signin";
+  let tenants = [], units = [], payments = [], funds = [], lastReceipt = null;
   let toastTimer = null;
 
   function toast(message, error = false) {
@@ -21,24 +20,7 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = "toast", 3600);
   }
   function showAuth() { $("auth-view").classList.remove("hidden"); $("app-view").classList.add("hidden"); }
-  function showApp() {
-    $("auth-view").classList.add("hidden"); $("app-view").classList.remove("hidden");
-    $("user-email").textContent = currentUser?.email || "";
-    const tenantMode = currentRole === "tenant";
-    $("tenant-portal").classList.toggle("hidden", !tenantMode);
-    document.querySelector(".sidebar").classList.toggle("hidden", tenantMode);
-    document.querySelector(".main").classList.toggle("hidden", tenantMode);
-  }
-  async function loadRole() {
-    const profile = await runQuery(supabase.from("profiles").select("role").eq("user_id", currentUser.id).single());
-    currentRole = profile.role;
-    if (!["landlord", "tenant"].includes(currentRole)) throw new Error("Your account role is not configured. Ask the administrator to configure it in Supabase.");
-    showApp();
-  }
-  function shareWhatsApp(message) {
-    const url = "https://wa.me/?text=" + encodeURIComponent(message);
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+  function showApp() { $("auth-view").classList.add("hidden"); $("app-view").classList.remove("hidden"); $("user-email").textContent = currentUser?.email || ""; }
   function errMessage(error) {
     if (!error) return "Something went wrong.";
     if (/duplicate key|unique constraint/i.test(error.message || "")) return "That unit name or receipt number already exists.";
@@ -87,131 +69,18 @@
 
   async function loadData() {
     try {
-      const [t,u,p] = await Promise.all([
+      const [t,u,p,f] = await Promise.all([
         runQuery(supabase.from("tenants").select("*").order("full_name")),
         runQuery(supabase.from("rental_units").select("*").order("unit_name")),
-        runQuery(supabase.from("rent_payments").select("*").order("payment_date",{ascending:false}).limit(2000))
+        runQuery(supabase.from("rent_payments").select("*").order("payment_date",{ascending:false}).limit(2000)),
+        runQuery(supabase.from("tenant_funds").select("*").order("transaction_date",{ascending:false}).limit(3000))
       ]);
-      tenants = t || []; units = u || []; payments = p || [];
-      if (currentRole === "tenant") renderTenantPortal();
-      else renderAll();
+      tenants = t || []; units = u || []; payments = p || []; funds = f || [];
+      renderAll();
     } catch (e) { toast(errMessage(e), true); }
-  }
-  function renderTenantPortal() {
-    const month = $("tenant-month").value || monthISO();
-    const tenant = tenants[0] || null;
-    const unit = units.find(u => u.tenant_id === tenant?.id) || units[0] || null;
-    $("tenant-welcome").textContent = tenant ? `Welcome, ${tenant.full_name}` : "Your landlord has not linked a tenant record to this account yet.";
-    $("tenant-rent").textContent = money(unit ? unit.monthly_rent : 0);
-    const paid = unit ? paidFor(unit.id, month) : 0;
-    const expected = unit ? expectedFor(unit, month) : 0;
-    $("tenant-paid").textContent = money(paid);
-    $("tenant-due").textContent = money(Math.max(0, expected - paid));
-    $("tenant-arrears").textContent = money(unit ? arrearsFor(unit, month) : 0);
-    const status = unit ? statusFor(unit, month) : ["Not assigned", "vacant"];
-    $("tenant-unit-table").innerHTML = unit
-      ? `<tr><td><strong>${escapeHTML(unit.unit_name)}</strong></td><td>${money(unit.monthly_rent)}</td><td>${escapeHTML(unit.lease_start)}</td><td>${badge(status)}</td></tr>`
-      : emptyRow(4, "No rental unit has been assigned to your account yet.");
-    const myPayments = payments.filter(p => !unit || p.unit_id === unit.id);
-    $("tenant-payments-table").innerHTML = myPayments.map(p =>
-      `<tr><td><strong>${escapeHTML(p.receipt_no)}</strong></td><td>${escapeHTML(p.payment_date)}</td><td>${escapeHTML(p.rent_month.slice(0,7))}</td><td>${escapeHTML(p.method)}</td><td>${money(p.amount)}</td><td><button class="mini-btn" data-tenant-receipt="${p.id}">Receipt</button></td></tr>`
-    ).join("") || emptyRow(6, "No payment history available.");
-  }
-  function shareMonthLabel(month) { return month ? new Date(`${month}-01T12:00:00`).toLocaleDateString("en-BD", {month:"long",year:"numeric"}) : ""; }
-  async function shareLandlordTenantStatement(tenantId) {
-    const tenant = tenants.find(t => t.id === tenantId);
-    const unit = units.find(u => u.tenant_id === tenantId && u.active);
-    if (!tenant || !unit) { toast("Assign this tenant to an active rental unit first.", true); return; }
-    try {
-      const result = await runQuery(supabase.rpc("create_tenant_share_link", { p_tenant_id: tenantId }));
-      const token = typeof result === "string" ? result : result?.token;
-      if (!token) throw new Error("Supabase did not return a sharing token. Check the tenant-sharing SQL setup.");
-      const link = `${location.origin}${location.pathname}?share=${encodeURIComponent(token)}`;
-      const month = activeMonth(), paid = paidFor(unit.id, month), expected = expectedFor(unit, month), due = Math.max(0, expected-paid);
-      const message = `Rent statement\nTenant: ${tenant.full_name}\nUnit: ${unit.unit_name}\nMonth: ${monthLabel(month)}\nMonthly rent: ${money(expected)}\nPaid: ${money(paid)}\nOutstanding: ${money(due)}\nView your private rent details and receipts (no account needed): ${link}`;
-      shareWhatsApp(message);
-      toast("Private link created. Review and send the WhatsApp message.");
-    } catch (e) { toast(errMessage(e), true); }
-  }
-  function publicShareStatus(unit, month, paid) {
-    if (!unit || !unit.active) return ["Inactive", "vacant"];
-    if (unit.lease_start > `${month}-01`) return ["Not started", "vacant"];
-    if (Math.max(0, Number(unit.monthly_rent) - paid) <= 0) return ["Paid", "paid"];
-    return [paid > 0 ? "Partial" : "Due", paid > 0 ? "partial" : "due"];
-  }
-  function renderPublicShare() {
-    const data = publicShareData;
-    if (!data) return;
-    const unit = data.unit || null;
-    const month = $("public-month").value || monthISO();
-    const unitPayments = (data.payments || []).filter(p => unit && p.unit_id === unit.id);
-    const paid = unitPayments.filter(p => p.rent_month === monthDate(month)).reduce((s,p) => s + Number(p.amount || 0), 0);
-    const eligible = unit && unit.active && unit.lease_start <= monthDate(month);
-    const expected = eligible ? Number(unit.monthly_rent || 0) : 0;
-    let arrears = 0;
-    if (unit && unit.active && unit.lease_start <= monthDate(month)) {
-      const start = new Date(`${unit.lease_start}T12:00:00`), end = new Date(`${month}-01T12:00:00`);
-      const cursor = new Date(start.getFullYear(), start.getMonth(), 1, 12);
-      while (cursor <= end) {
-        const m = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,"0")}`;
-        const mPaid = unitPayments.filter(p => p.rent_month === monthDate(m)).reduce((s,p) => s + Number(p.amount || 0), 0);
-        arrears += Math.max(0, Number(unit.monthly_rent || 0) - mPaid);
-        cursor.setMonth(cursor.getMonth()+1);
-      }
-    }
-    $("public-share-welcome").textContent = `Welcome, ${data.tenant_name || "Tenant"}`;
-    $("public-rent").textContent = money(unit?.monthly_rent || 0);
-    $("public-paid").textContent = money(paid);
-    $("public-due").textContent = money(Math.max(0, expected-paid));
-    $("public-arrears").textContent = money(arrears);
-    const status = publicShareStatus(unit, month, paid);
-    $("public-unit-table").innerHTML = unit
-      ? `<tr><td><strong>${escapeHTML(unit.unit_name)}</strong></td><td>${money(unit.monthly_rent)}</td><td>${escapeHTML(unit.lease_start)}</td><td>${badge(status)}</td></tr>`
-      : emptyRow(4, "No active rental unit is assigned to this tenant.");
-    $("public-payments-table").innerHTML = unitPayments.map(p =>
-      `<tr><td><strong>${escapeHTML(p.receipt_no)}</strong></td><td>${escapeHTML(p.payment_date)}</td><td>${escapeHTML(String(p.rent_month || "").slice(0,7))}</td><td>${escapeHTML(p.method || "—")}</td><td>${money(p.amount)}</td><td><button class="mini-btn" data-public-receipt="${escapeHTML(p.id)}">Print receipt</button></td></tr>`
-    ).join("") || emptyRow(6, "No payment history available.");
-  }
-  function printPublicReceipt(paymentId) {
-    const payment = (publicShareData?.payments || []).find(p => p.id === paymentId);
-    if (!payment) return;
-    const data = publicShareData, unit = data.unit || {};
-    const win = window.open("", "_blank", "width=720,height=760");
-    if (!win) { toast("Allow pop-ups to print the receipt.", true); return; }
-    const content = `<h1>House Rent Manager</h1><h2>Payment receipt</h2><hr><p><b>Receipt:</b> ${escapeHTML(payment.receipt_no)}</p><p><b>Tenant:</b> ${escapeHTML(data.tenant_name)}</p><p><b>Unit:</b> ${escapeHTML(unit.unit_name || "—")}</p><p><b>Payment date:</b> ${escapeHTML(payment.payment_date)}</p><p><b>Rent month:</b> ${escapeHTML(shareMonthLabel(String(payment.rent_month).slice(0,7)))}</p><p><b>Method:</b> ${escapeHTML(payment.method || "—")}</p><h2>Amount received: ${money(payment.amount)}</h2><p>This receipt reflects the payment recorded by the landlord.</p>`;
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Rent receipt</title><style>body{font:16px Arial,sans-serif;max-width:650px;margin:40px auto;color:#222}h1{color:#155eef}hr{border:0;border-top:1px solid #ddd}</style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);
-    win.document.close();
-  }
-  async function loadPublicShare(token) {
-    publicShareMode = true;
-    $("auth-view").classList.add("hidden"); $("app-view").classList.add("hidden"); $("public-share-view").classList.remove("hidden");
-    if (!configured || !window.supabase?.createClient) {
-      $("public-share-error").textContent = "This website has not been configured. Please contact the landlord.";
-      $("public-share-error").classList.remove("hidden"); return;
-    }
-    supabase = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-    try {
-      const data = await runQuery(supabase.rpc("get_shared_tenant_rent", {p_token: token}));
-      if (!data || data.error || !data.tenant_name) throw new Error("This private link is invalid, expired, or has been revoked. Ask your landlord for a new link.");
-      publicShareData = data;
-      $("public-month").value = monthISO();
-      $("public-share-content").classList.remove("hidden");
-      renderPublicShare();
-    } catch (e) {
-      $("public-share-error").textContent = /invalid|revoked|expired/i.test(e.message || "") ? e.message : "Unable to load this private statement. The link may have been revoked or the service is unavailable.";
-      $("public-share-error").classList.remove("hidden");
-      $("public-share-welcome").textContent = "Rent information unavailable";
-    }
-  }
-  function shareTenantStatement() {
-    const tenant = tenants[0] || null, unit = units.find(u => u.tenant_id === tenant?.id) || units[0] || null;
-    if (!unit) { toast("No rental unit is linked to this account yet.", true); return; }
-    const month = $("tenant-month").value || monthISO(), paid = paidFor(unit.id, month), expected = expectedFor(unit, month), due = Math.max(0, expected-paid);
-    const message = `Rent statement\\nTenant: ${tenant?.full_name || currentUser?.email || "Tenant"}\\nUnit: ${unit.unit_name}\\nMonth: ${monthLabel(month)}\\nMonthly rent: ${money(expected)}\\nPaid: ${money(paid)}\\nOutstanding: ${money(due)}\\nView private account: ${location.href}`;
-    shareWhatsApp(message);
   }
   function renderAll() {
-    renderDashboard(); renderUnits(); renderTenants(); renderPayments(); renderReports();
+    renderDashboard(); renderUnits(); renderTenants(); renderPayments(); renderReports(); renderFunds();
     $("current-month-label").textContent = monthLabel(activeMonth());
   }
   function renderDashboard() {
@@ -236,7 +105,7 @@
   function renderTenants() {
     $("tenants-table").innerHTML=tenants.map(t=>{
       const assigned=units.filter(u=>u.tenant_id===t.id).map(u=>u.unit_name).join(", ") || "—";
-      return `<tr><td><strong>${escapeHTML(t.full_name)}</strong></td><td>${escapeHTML(t.phone||"—")}</td><td>${escapeHTML(t.email||"—")}</td><td>${escapeHTML(assigned)}</td><td><div class="row-actions"><button class="mini-btn" data-share-tenant="${t.id}">Share private link</button><button class="mini-btn danger" data-revoke-tenant="${t.id}">Revoke link</button><button class="mini-btn" data-edit-tenant="${t.id}">Edit</button><button class="mini-btn danger" data-delete-tenant="${t.id}">Delete</button></div></td></tr>`;
+      return `<tr><td><strong>${escapeHTML(t.full_name)}</strong></td><td>${escapeHTML(t.phone||"—")}</td><td>${escapeHTML(t.email||"—")}</td><td>${escapeHTML(assigned)}</td><td><div class="row-actions"><button class="mini-btn" data-edit-tenant="${t.id}">Edit</button><button class="mini-btn danger" data-delete-tenant="${t.id}">Delete</button></div></td></tr>`;
     }).join("") || emptyRow(5,"No tenants added yet.");
   }
   function renderPayments() {
@@ -249,6 +118,29 @@
       const unit=units.find(u=>u.id===p.unit_id), tenant=tenants.find(t=>t.id===p.tenant_id);
       return `<tr><td><strong>${escapeHTML(p.receipt_no)}</strong></td><td>${escapeHTML(p.payment_date)}</td><td>${escapeHTML(unit?.unit_name||"Deleted unit")} / ${escapeHTML(tenant?.full_name||"Tenant")}</td><td>${escapeHTML(p.rent_month.slice(0,7))}</td><td>${escapeHTML(p.method)}</td><td><strong>${money(p.amount)}</strong></td><td><button class="mini-btn" data-receipt="${p.id}">Receipt</button></td></tr>`;
     }).join("") || emptyRow(7,"No payments match this search.");
+  }
+  function fundBalance(tenantId, type) {
+    return funds.filter(f=>f.tenant_id===tenantId && f.fund_type===type).reduce((sum,f)=>sum+(f.direction==="credit"?1:-1)*Number(f.amount),0);
+  }
+  function renderFunds() {
+    const adv=funds.filter(f=>f.fund_type==="advance_rent").reduce((s,f)=>s+(f.direction==="credit"?1:-1)*Number(f.amount),0);
+    const sec=funds.filter(f=>f.fund_type==="security_deposit").reduce((s,f)=>s+(f.direction==="credit"?1:-1)*Number(f.amount),0);
+    $("fund-advance-total").textContent=money(adv); $("fund-security-total").textContent=money(sec);
+    $("fund-balances-table").innerHTML=tenants.map(t=>{const unit=units.find(u=>u.tenant_id===t.id);return `<tr><td><strong>${escapeHTML(t.full_name)}</strong></td><td>${escapeHTML(unit?.unit_name||"—")}</td><td>${money(fundBalance(t.id,"advance_rent"))}</td><td>${money(fundBalance(t.id,"security_deposit"))}</td></tr>`;}).join("")||emptyRow(4,"No tenants available.");
+    $("fund-history-table").innerHTML=funds.map(f=>{const t=tenants.find(x=>x.id===f.tenant_id);return `<tr><td>${escapeHTML(f.transaction_date)}</td><td>${escapeHTML(t?.full_name||"Tenant")}</td><td>${f.fund_type==="advance_rent"?"Advance rent":"Security deposit"}</td><td>${f.direction==="credit"?"Received":"Used / refunded"}</td><td><strong>${money(f.amount)}</strong></td><td>${escapeHTML(f.note||"—")}</td></tr>`;}).join("")||emptyRow(6,"No advance or deposit transactions yet.");
+  }
+  function openFundDialog() {
+    if(!tenants.length){toast("Add a tenant first.",true);navigate("tenants");return;}
+    $("fund-form").reset(); $("fund-tenant").innerHTML=tenants.map(t=>`<option value="${t.id}">${escapeHTML(t.full_name)}</option>`).join("");
+    $("fund-unit").innerHTML='<option value="">Not specified</option>'+units.filter(u=>u.tenant_id).map(u=>`<option value="${u.id}">${escapeHTML(u.unit_name)}</option>`).join("");
+    $("fund-date").value=todayISO(); $("fund-dialog").showModal();
+  }
+  async function saveFund(event) {
+    event.preventDefault(); const tenantId=$("fund-tenant").value, type=$("fund-type").value, direction=$("fund-direction").value, amount=Number($("fund-amount").value);
+    if(!(amount>0)){toast("Enter an amount greater than zero.",true);return;}
+    if(direction==="debit" && amount>fundBalance(tenantId,type)){toast("This transaction is greater than the available balance.",true);return;}
+    const payload={user_id:currentUser.id,tenant_id:tenantId,unit_id:$("fund-unit").value||null,fund_type:type,direction,amount,transaction_date:$("fund-date").value,note:$("fund-note").value.trim()};
+    try{await runQuery(supabase.from("tenant_funds").insert(payload));$("fund-dialog").close();await loadData();toast("Advance / deposit transaction saved.");}catch(e){toast(errMessage(e),true);}
   }
   function renderReports() {
     const month=$("report-month").value||activeMonth();
@@ -267,7 +159,7 @@
     document.querySelectorAll(".page").forEach(el=>el.classList.add("hidden"));
     $(`page-${page}`).classList.remove("hidden");
     document.querySelectorAll(".nav-item").forEach(el=>el.classList.toggle("active",el.dataset.page===page));
-    const names={dashboard:"Dashboard",units:"Rental units",tenants:"Tenants",payments:"Rent collection",reports:"Reports"};
+    const names={dashboard:"Dashboard",units:"Rental units",tenants:"Tenants",payments:"Rent collection",funds:"Advance & deposit",reports:"Reports"};
     $("page-title").textContent=names[page]||"Dashboard";
   }
   function fillTenantSelect(select, selected="") {
@@ -343,12 +235,6 @@
     $("receipt-content").innerHTML=`<div class="receipt-brand"><h2>House Rent Manager</h2><p>Rent payment receipt</p></div><div class="receipt-title">PAYMENT RECEIPT</div><div class="receipt-lines"><div><span>Receipt number</span><b>${escapeHTML(payment.receipt_no)}</b></div><div><span>Payment date</span><b>${escapeHTML(payment.payment_date)}</b></div><div><span>Tenant</span><b>${escapeHTML(tenant?.full_name||"Tenant")}</b></div><div><span>Phone</span><b>${escapeHTML(tenant?.phone||"—")}</b></div><div><span>Rental unit</span><b>${escapeHTML(unit?.unit_name||"—")}</b></div><div><span>Rent month</span><b>${escapeHTML(monthLabel(payment.rent_month.slice(0,7)))}</b></div><div><span>Payment method</span><b>${escapeHTML(payment.method)}</b></div><div><span>Reference / note</span><b>${escapeHTML(payment.note||"—")}</b></div></div><div class="receipt-total"><span>Amount received</span><span>${money(payment.amount)}</span></div><p class="receipt-foot">This receipt confirms the amount recorded above. Keep it for your records.</p>`;
     $("receipt-dialog").showModal();
   }
-  function shareReceiptWhatsApp() {
-    if (!lastReceipt) return;
-    const payment = lastReceipt, unit = units.find(u => u.id === payment.unit_id), tenant = tenants.find(t => t.id === payment.tenant_id);
-    const message = `Rent payment receipt\\nReceipt: ${payment.receipt_no}\\nTenant: ${tenant?.full_name || "Tenant"}\\nUnit: ${unit?.unit_name || "—"}\\nRent month: ${monthLabel(payment.rent_month.slice(0,7))}\\nPayment date: ${payment.payment_date}\\nMethod: ${payment.method}\\nAmount received: ${money(payment.amount)}\\nPrivate portal: ${location.href}\\nFor a printable receipt, open the portal and choose Print receipt.`;
-    shareWhatsApp(message);
-  }
   function exportCSV() {
     const month=$("report-month").value||activeMonth();
     const rows=[["Month","Unit","Tenant","Expected rent (BDT)","Paid (BDT)","Due (BDT)","Arrears through month (BDT)","Status"]];
@@ -365,11 +251,11 @@
     try{
       if(authMode==="signup"){
         const {data,error}=await supabase.auth.signUp({email,password});if(error)throw error;
-        if(data.session){currentUser=data.user;await loadRole();await loadData();}
-        else toast("Account created. Check your email to confirm, then sign in. Your account defaults to tenant access until the landlord role is assigned in Supabase.");
+        if(data.session){currentUser=data.user;showApp();await loadData();}
+        else toast("Account created. Check your email to confirm, then sign in.");
       }else{
         const {data,error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;
-        currentUser=data.user;await loadRole();await loadData();
+        currentUser=data.user;showApp();await loadData();
       }
     }catch(e){toast(errMessage(e),true);}finally{$("auth-submit").disabled=false;}
   }
@@ -378,7 +264,7 @@
     $("auth-submit").textContent=mode==="signup"?"Create account":"Sign in";
     $("auth-password").autocomplete=mode==="signup"?"new-password":"current-password";
   }
-  async function signOut() {await supabase.auth.signOut();currentUser=null;currentRole=null;tenants=[];units=[];payments=[];showAuth();toast("Signed out.");}
+  async function signOut() {await supabase.auth.signOut();currentUser=null;tenants=[];units=[];payments=[];funds=[];showAuth();toast("Signed out.");}
   function bindEvents() {
     document.querySelectorAll("[data-auth-tab]").forEach(b=>b.addEventListener("click",()=>setAuthMode(b.dataset.authTab)));
     $("auth-form").addEventListener("submit",authSubmit);$("signout-btn").addEventListener("click",signOut);
@@ -386,36 +272,26 @@
     document.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>navigate(b.dataset.go)));
     $("add-unit-btn").addEventListener("click",()=>openUnit());$("add-tenant-btn").addEventListener("click",()=>openTenant());
     $("add-payment-btn").addEventListener("click",openPayment);$("quick-payment").addEventListener("click",openPayment);
+    $("add-fund-btn").addEventListener("click",openFundDialog);$("fund-form").addEventListener("submit",saveFund);
     $("unit-form").addEventListener("submit",saveUnit);$("tenant-form").addEventListener("submit",saveTenant);$("payment-form").addEventListener("submit",savePayment);
     document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>$(b.dataset.close).close()));
     $("dashboard-month").addEventListener("change",renderAll);$("report-month").addEventListener("change",renderReports);$("refresh-btn").addEventListener("click",loadData);
     $("payment-search").addEventListener("input",renderPayments);$("payment-unit").addEventListener("change",updatePaymentBalance);$("payment-month").addEventListener("change",updatePaymentBalance);
-    $("print-receipt-btn").addEventListener("click",()=>window.print());$("share-receipt-btn").addEventListener("click",shareReceiptWhatsApp);$("tenant-signout-btn").addEventListener("click",signOut);
-    $("tenant-month").value=monthISO();$("tenant-month").addEventListener("change",renderTenantPortal);$("tenant-share-statement").addEventListener("click",shareTenantStatement);
-    $("tenant-payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-tenant-receipt]");if(btn){const p=payments.find(x=>x.id===btn.dataset.tenantReceipt);if(p)showReceipt(p);}});
-    $("print-report-btn").addEventListener("click",()=>window.print());$("export-csv-btn").addEventListener("click",exportCSV);
+    $("print-receipt-btn").addEventListener("click",()=>window.print());$("print-report-btn").addEventListener("click",()=>window.print());$("export-csv-btn").addEventListener("click",exportCSV);
     $("units-table").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-unit]"),del=e.target.closest("[data-delete-unit]");if(edit)openUnit(edit.dataset.editUnit);if(del)deleteRecord("rental_units",del.dataset.deleteUnit,"rental unit");});
-    $("tenants-table").addEventListener("click",async e=>{const share=e.target.closest("[data-share-tenant]"),revoke=e.target.closest("[data-revoke-tenant]"),edit=e.target.closest("[data-edit-tenant]"),del=e.target.closest("[data-delete-tenant]");if(share)shareLandlordTenantStatement(share.dataset.shareTenant);if(revoke){if(confirm("Revoke this tenant’s current private link? Anyone using it will lose access.")){try{await runQuery(supabase.rpc("revoke_tenant_share_link",{p_tenant_id:revoke.dataset.revokeTenant}));toast("Private link revoked.");}catch(err){toast(errMessage(err),true);}}}if(edit)openTenant(edit.dataset.editTenant);if(del){const id=del.dataset.deleteTenant;if(units.some(u=>u.tenant_id===id)){toast("Reassign or remove this tenant from rental units before deleting.",true);return;}deleteRecord("tenants",id,"tenant");}});
-    $("public-month").addEventListener("change",renderPublicShare);
-    $("public-print-btn").addEventListener("click",()=>window.print());
-    $("public-payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-public-receipt]");if(btn)printPublicReceipt(btn.dataset.publicReceipt);});
+    $("tenants-table").addEventListener("click",e=>{const edit=e.target.closest("[data-edit-tenant]"),del=e.target.closest("[data-delete-tenant]");if(edit)openTenant(edit.dataset.editTenant);if(del){const id=del.dataset.deleteTenant;if(units.some(u=>u.tenant_id===id)){toast("Reassign or remove this tenant from rental units before deleting.",true);return;}deleteRecord("tenants",id,"tenant");}});
     $("payments-table").addEventListener("click",e=>{const btn=e.target.closest("[data-receipt]");if(btn){const p=payments.find(x=>x.id===btn.dataset.receipt);if(p)showReceipt(p);}});
     $("dashboard-month").value=monthISO();$("report-month").value=monthISO();$("current-month-label").textContent=monthLabel(monthISO());
   }
   async function init() {
     bindEvents();
-    const shareToken = new URLSearchParams(location.search).get("share");
-    if (shareToken) {
-      await loadPublicShare(shareToken);
-      return;
-    }
     if(!configured || !window.supabase?.createClient) {
       showAuth();toast("Setup needed: configure Supabase in config.js and run schema.sql.",true);return;
     }
     supabase=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
     const {data:{session}}=await supabase.auth.getSession();
-    if(session){currentUser=session.user;try{await loadRole();await loadData();}catch(e){toast(errMessage(e),true);showAuth();}}else showAuth();
-    supabase.auth.onAuthStateChange(async (_event,session)=>{if(session){currentUser=session.user;try{await loadRole();await loadData();}catch(e){toast(errMessage(e),true);}}else{currentUser=null;currentRole=null;showAuth();}});
+    if(session){currentUser=session.user;showApp();await loadData();}else showAuth();
+    supabase.auth.onAuthStateChange((_event,session)=>{if(session){currentUser=session.user;showApp();}else{currentUser=null;showAuth();}});
   }
   document.addEventListener("DOMContentLoaded",init);
 })();

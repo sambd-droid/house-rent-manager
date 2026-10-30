@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#155eef">
-  <title>Ratan Bhaban Rent Manager</title>
+  <title>House Rent Manager</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
@@ -12,34 +12,10 @@
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <main id="public-share-view" class="tenant-portal hidden">
-    <header class="tenant-topbar">
-      <div><p class="eyebrow">RATAN BHABAN - PRIVATE RENT STATEMENT</p><h1>Your rental overview</h1><p id="public-share-welcome" class="muted">Loading your rental information…</p></div>
-      <button id="public-print-btn" class="btn secondary" type="button">Print statement</button>
-    </header>
-    <div id="public-share-error" class="notice hidden" role="alert"></div>
-    <div id="public-share-content" class="hidden">
-      <div class="stats-grid">
-        <article class="stat-card"><span>Monthly rent</span><strong id="public-rent">৳0</strong><small>Assigned rental unit</small></article>
-        <article class="stat-card"><span>Paid this month</span><strong id="public-paid">৳0</strong><small>Payments recorded</small></article>
-        <article class="stat-card"><span>Due this month</span><strong id="public-due">৳0</strong><small>Outstanding for selected month</small></article>
-        <article class="stat-card"><span>Arrears through month</span><strong id="public-arrears">৳0</strong><small>Based on recorded rent</small></article>
-      </div>
-      <section class="panel"><div class="panel-heading"><div><h2>Rental details</h2><p class="muted">Your unit and rent information</p></div><label class="inline-label">Month <input id="public-month" type="month"></label></div>
-        <div class="table-wrap"><table><thead><tr><th>Unit</th><th>Monthly rent</th><th>Lease start</th><th>Month status</th></tr></thead><tbody id="public-unit-table"></tbody></table></div>
-      </section>
-      <section class="panel"><div class="panel-heading"><div><h2>Payment history and receipts</h2><p class="muted">Print any receipt for your records.</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>Receipt</th><th>Payment date</th><th>Rent month</th><th>Method</th><th>Amount</th><th></th></tr></thead><tbody id="public-payments-table"></tbody></table></div>
-      </section>
-      <p class="tenant-security-note">This private link shows information for one tenant only. If you received it by mistake, please notify the landlord.</p>
-    </div>
-    <footer>RATAN BHABAN House Rent Manager · Private tenant statement</footer>
-  </main>
-
   <main class="auth-wrap" id="auth-view">
     <section class="auth-card">
       <div class="brand-mark">⌂</div>
-      <h1>RT BHABAN House Rent Manager</h1>
+      <h1>House Rent Manager</h1>
       <p class="muted">Manage rental units, tenants, rent and receipts.</p>
       <div class="tabs">
         <button class="tab active" type="button" data-auth-tab="signin">Sign in</button>
@@ -55,21 +31,6 @@
   </main>
 
   <div id="app-view" class="app hidden">
-    <section id="tenant-portal" class="tenant-portal hidden">
-      <header class="tenant-topbar">
-        <div><p class="eyebrow">TENANT PORTAL</p><h1>Your rental overview</h1><p id="tenant-welcome" class="muted"></p></div>
-        <button id="tenant-signout-btn" class="btn secondary" type="button">Sign out</button>
-      </header>
-      <div class="stats-grid">
-        <article class="stat-card"><span>Monthly rent</span><strong id="tenant-rent">৳0</strong><small>Current assigned unit</small></article>
-        <article class="stat-card"><span>Paid this month</span><strong id="tenant-paid">৳0</strong><small>Payments recorded</small></article>
-        <article class="stat-card"><span>Due this month</span><strong id="tenant-due">৳0</strong><small>Outstanding balance</small></article>
-        <article class="stat-card"><span>Arrears through month</span><strong id="tenant-arrears">৳0</strong><small>Based on recorded rent</small></article>
-      </div>
-      <section class="panel"><div class="panel-heading"><div><h2>Your rental details</h2><p class="muted">Only rental information assigned to your account is shown.</p></div><div class="report-actions"><label class="inline-label">Month <input id="tenant-month" type="month"></label><button id="tenant-share-statement" class="btn primary" type="button">Share statement on WhatsApp</button></div></div><div class="table-wrap"><table><thead><tr><th>Unit</th><th>Monthly rent</th><th>Lease start</th><th>Month status</th></tr></thead><tbody id="tenant-unit-table"></tbody></table></div></section>
-      <section class="panel"><div class="panel-heading"><div><h2>Your payment history</h2><p class="muted">Open a receipt to view or share it.</p></div></div><div class="table-wrap"><table><thead><tr><th>Receipt</th><th>Payment date</th><th>Rent month</th><th>Method</th><th>Amount</th><th></th></tr></thead><tbody id="tenant-payments-table"></tbody></table></div></section>
-      <p class="tenant-security-note">Sign out when using a shared device. Contact your landlord if a payment or balance looks incorrect.</p>
-    </section>
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark small-mark">⌂</span><span>Rent Manager</span></div>
       <nav>
@@ -77,6 +38,7 @@
         <button class="nav-item" data-page="units">▤ <span>Rental units</span></button>
         <button class="nav-item" data-page="tenants">♙ <span>Tenants</span></button>
         <button class="nav-item" data-page="payments">৳ <span>Rent collection</span></button>
+        <button class="nav-item" data-page="funds">◈ <span>Advance & deposit</span></button>
         <button class="nav-item" data-page="reports">▥ <span>Reports</span></button>
       </nav>
       <div class="sidebar-bottom">
@@ -123,6 +85,13 @@
       <section id="page-payments" class="page hidden">
         <div class="section-head"><div><h2>Rent collection</h2><p class="muted">Record cash, bank, bKash or Nagad payments.</p></div><button id="add-payment-btn" class="btn primary">＋ Record payment</button></div>
         <section class="panel"><div class="panel-heading"><div><h2>Payment history</h2><p class="muted">Latest recorded payments</p></div><input id="payment-search" class="search" type="search" placeholder="Search unit or tenant"></div><div class="table-wrap"><table><thead><tr><th>Receipt</th><th>Date</th><th>Unit / tenant</th><th>Rent month</th><th>Method</th><th>Amount</th><th></th></tr></thead><tbody id="payments-table"></tbody></table></div></section>
+      </section>
+
+      <section id="page-funds" class="page hidden">
+        <div class="section-head"><div><h2>Advance rent & security deposit</h2><p class="muted">Track refundable security deposits separately from advance rent.</p></div><button id="add-fund-btn" class="btn primary">＋ Record advance / deposit</button></div>
+        <div class="stats-grid compact-stats"><article class="stat-card"><span>Advance rent balance</span><strong id="fund-advance-total">৳0</strong><small>Available advance rent credit</small></article><article class="stat-card"><span>Security deposit held</span><strong id="fund-security-total">৳0</strong><small>Refundable deposit balance</small></article></div>
+        <section class="panel"><div class="panel-heading"><div><h2>Tenant fund balances</h2><p class="muted">Credit adds to the balance; debit records use, adjustment or refund.</p></div></div><div class="table-wrap"><table><thead><tr><th>Tenant</th><th>Unit</th><th>Advance rent</th><th>Security deposit</th></tr></thead><tbody id="fund-balances-table"></tbody></table></div></section>
+        <section class="panel"><div class="panel-heading"><div><h2>Transaction history</h2><p class="muted">All advance-rent and security-deposit entries.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Tenant</th><th>Type</th><th>Entry</th><th>Amount</th><th>Note</th></tr></thead><tbody id="fund-history-table"></tbody></table></div></section>
       </section>
 
       <section id="page-reports" class="page hidden">
@@ -173,10 +142,25 @@
     </form>
   </dialog>
 
+
+  <dialog id="fund-dialog" class="modal">
+    <form id="fund-form" method="dialog">
+      <div class="modal-head"><div><h2>Record advance / deposit</h2><p class="muted">Keep advance rent and security deposit in separate balances.</p></div><button type="button" class="icon-btn" data-close="fund-dialog">×</button></div>
+      <label>Tenant<select id="fund-tenant" required></select></label>
+      <label>Rental unit (optional)<select id="fund-unit"><option value="">Not specified</option></select></label>
+      <label>Fund type<select id="fund-type"><option value="advance_rent">Advance rent</option><option value="security_deposit">Security deposit</option></select></label>
+      <label>Transaction<select id="fund-direction"><option value="credit">Received / add balance</option><option value="debit">Used / adjusted / refunded</option></select></label>
+      <label>Amount (BDT)<input id="fund-amount" type="number" required min="0.01" step="0.01"></label>
+      <label>Date<input id="fund-date" type="date" required></label>
+      <label>Note (optional)<input id="fund-note" maxlength="250" placeholder="e.g. 2 months advance rent"></label>
+      <div class="modal-actions"><button type="button" class="btn secondary" data-close="fund-dialog">Cancel</button><button type="submit" class="btn primary">Save transaction</button></div>
+    </form>
+  </dialog>
+
   <dialog id="receipt-dialog" class="modal receipt-modal">
     <div class="modal-head no-print"><div><h2>Payment receipt</h2><p class="muted">Print or save as PDF.</p></div><button type="button" class="icon-btn" data-close="receipt-dialog">×</button></div>
     <div id="receipt-content" class="receipt-content"></div>
-    <div class="modal-actions no-print"><button type="button" class="btn secondary" data-close="receipt-dialog">Close</button><button id="share-receipt-btn" type="button" class="btn secondary">Share on WhatsApp</button><button id="print-receipt-btn" type="button" class="btn primary">Print receipt</button></div>
+    <div class="modal-actions no-print"><button type="button" class="btn secondary" data-close="receipt-dialog">Close</button><button id="print-receipt-btn" type="button" class="btn primary">Print receipt</button></div>
   </dialog>
 </body>
 </html>
